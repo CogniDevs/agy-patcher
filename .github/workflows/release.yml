@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version string to embed in binaries (defaults to commit SHA)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet and Test
+        run: |
+          go vet ./...
+          go test -count=1 ./...
+
+      - name: Determine version
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            ver="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            ver="$(printf '%s' "${{ inputs.version }}" | tr -cd 'A-Za-z0-9._+-')"
+          else
+            ver="0.0.0-${GITHUB_SHA::7}"
+          fi
+          if [[ -z "$ver" ]]; then
+            ver="0.0.0-${GITHUB_SHA::7}"
+          fi
+          echo "version=${ver}" >> "$GITHUB_OUTPUT"
+
+      - name: Build single-file binaries
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          mkdir -p dist
+          targets=(
+            "windows amd64 .exe"
+            "windows arm64 .exe"
+            "linux amd64 "
+            "linux arm64 "
+            "darwin amd64 "
+            "darwin arm64 "
+          )
+          for target in "${targets[@]}"; do
+            read -r goos goarch ext <<< "$target"
+            out="dist/agpatcher-${goos}-${goarch}${ext}"
+            echo "Building ${out}..."
+            GOOS="$goos" GOARCH="$goarch" go build \
+              -trimpath \
+              -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "$out" \
+              ./cmd/agpatcher
+          done
+          (cd dist && sha256sum agpatcher-* > checksums.txt)
+          ls -lh dist
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: agpatcher-binaries
+          path: dist/*
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi

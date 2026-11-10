@@ -1,0 +1,7 @@
+/dist/
+/agpatcher
+/agpatcher.exe
+/*.exe
+*.test
+*.out
+.DS_Store
