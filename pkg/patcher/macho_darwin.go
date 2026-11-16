@@ -23,9 +23,9 @@ func prepareSwappedBinary(tmpPath, finalTarget string) error {
 }
 
 func afterBinaryWrite(finalTarget string) {
-	if bundle := darwinBundleOf(finalTarget); bundle != "" {
-		stripDarwinQuarantine(bundle)
-	}
+	// Strip quarantine specifically from the patched binary rather than recursing
+	// up to the .app bundle, preserving Gatekeeper and Keychain entitlements on the outer bundle.
+	stripDarwinQuarantine(finalTarget)
 }
 
 func isMachOFile(path string) bool {
@@ -54,20 +54,6 @@ func resignMachO(path string) error {
 		return fmt.Errorf("codesign failed: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-func darwinBundleOf(path string) string {
-	cur := filepath.Clean(path)
-	for {
-		if strings.EqualFold(filepath.Ext(cur), ".app") {
-			return cur
-		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			return ""
-		}
-		cur = parent
-	}
 }
 
 func stripDarwinQuarantine(path string) {

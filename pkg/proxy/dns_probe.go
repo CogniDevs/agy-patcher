@@ -42,11 +42,14 @@ type CatalogSyncStats struct {
 type DNSProbeStatus string
 
 const (
-	ProbeSub    DNSProbeStatus = "sub"
-	ProbeDirect DNSProbeStatus = "direct"
-	ProbeTLSErr DNSProbeStatus = "tls_err"
-	ProbeErr    DNSProbeStatus = "err"
+	ProbeSub     DNSProbeStatus = "sub"
+	ProbeDirect  DNSProbeStatus = "direct"
+	ProbeTLSErr  DNSProbeStatus = "tls_err"
+	ProbeCaptcha DNSProbeStatus = "captcha"
+	ProbeErr     DNSProbeStatus = "err"
 )
+
+var ErrGoogleCaptcha = errors.New("google captcha block (/sorry/)")
 
 // DNSProbeHostResult captures resolution and TLS check details for a single gate hostname.
 type DNSProbeHostResult struct {
@@ -516,6 +519,9 @@ func ProbeProviders(ctx context.Context, list []DNSProviderSpec, opts ProbeOptio
 			case len(subOKHosts) > 0:
 				res.Status = ProbeSub
 				res.Summary = strings.Join(subOKHosts, ",")
+			case strings.Contains(firstTLSErr, "captcha"):
+				res.Status = ProbeCaptcha
+				res.Summary = firstTLSErr
 			case firstTLSErr != "":
 				res.Status = ProbeTLSErr
 				res.Summary = firstTLSErr
@@ -559,6 +565,24 @@ func defaultTLSProbeCheck(ctx context.Context, ip, serverName string) error {
 		_ = tlsConn.SetDeadline(time.Now().Add(2500 * time.Millisecond))
 	}
 	err = tlsConn.Handshake()
+	if err != nil {
+		_ = tlsConn.Close()
+		return err
+	}
+
+	// Send a lightweight HTTP request to verify the substituted IP is not returning a Google Captcha /sorry/ block.
+	req := fmt.Sprintf("HEAD / HTTP/1.1\r\nHost: %s\r\nUser-Agent: agpatcher\r\nConnection: close\r\n\r\n", serverName)
+	if _, wErr := io.WriteString(tlsConn, req); wErr == nil {
+		buf := make([]byte, 1024)
+		n, _ := tlsConn.Read(buf)
+		if n > 0 {
+			respSnippet := strings.ToLower(string(buf[:n]))
+			if strings.Contains(respSnippet, "/sorry/") || strings.Contains(respSnippet, "recaptcha") {
+				_ = tlsConn.Close()
+				return ErrGoogleCaptcha
+			}
+		}
+	}
 	_ = tlsConn.Close()
-	return err
+	return nil
 }

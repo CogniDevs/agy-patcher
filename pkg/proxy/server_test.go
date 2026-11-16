@@ -702,9 +702,17 @@ func TestProbeDNSProvidersClassification(t *testing.T) {
 	}))
 	defer directSrv.Close()
 
+	captchaSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q, _ := base64.RawURLEncoding.DecodeString(r.URL.Query().Get("dns"))
+		w.Header().Set("Content-Type", "application/dns-message")
+		_, _ = w.Write(buildTestDNSResponse(q, [4]byte{203, 0, 113, 77}))
+	}))
+	defer captchaSrv.Close()
+
 	list := []DNSProviderSpec{
 		{Name: "sub-ok", Kind: DNSKindDoH, Target: subSrv.URL, Enabled: true},
 		{Name: "sub-bad-tls", Kind: DNSKindDoH, Target: tlsFailSrv.URL, Enabled: false},
+		{Name: "sub-captcha", Kind: DNSKindDoH, Target: captchaSrv.URL, Enabled: false},
 		{Name: "direct-only", Kind: DNSKindDoH, Target: directSrv.URL, Enabled: false},
 		{Name: "dead-udp", Kind: DNSKindUDP, Target: "127.0.0.1:1", Enabled: false},
 	}
@@ -717,13 +725,16 @@ func TestProbeDNSProvidersClassification(t *testing.T) {
 			if ip == "203.0.113.55" {
 				return nil
 			}
+			if ip == "203.0.113.77" {
+				return ErrGoogleCaptcha
+			}
 			return io.EOF
 		},
 	})
-	if len(results) != 4 {
-		t.Fatalf("expected 4 results, got %d", len(results))
+	if len(results) != 5 {
+		t.Fatalf("expected 5 results, got %d", len(results))
 	}
-	if results[0].Status != ProbeSub || results[1].Status != ProbeTLSErr || results[2].Status != ProbeDirect || results[3].Status != ProbeErr {
+	if results[0].Status != ProbeSub || results[1].Status != ProbeTLSErr || results[2].Status != ProbeCaptcha || results[3].Status != ProbeDirect || results[4].Status != ProbeErr {
 		t.Fatalf("unexpected probe classification: %+v", results)
 	}
 }
