@@ -1,5 +1,71 @@
 # agy-patcher
 
+<details open>
+<summary><b>English</b></summary>
+
+Utility for configuring Antigravity (Desktop, CLI `agy`, VS Code editor extensions, and JetBrains plugin) to route through a local bypass proxy on Windows, Linux, and macOS.
+
+## Features
+
+- **Automatic Installation Discovery**: Scans and discovers Antigravity clients and plugins across the OS; custom paths can be added via the TUI panel or `--path` flag.
+- **Patch and Rollback**: Enables network routing for selected installations and supports full rollback from automated backup archives.
+- **Local Proxy & Smart DNS**: Spawns a local HTTP CONNECT proxy with dynamic port allocation, customizable DNS resolvers (`DoH` / `DoT` / `UDP`), embedded catalog in `dns/providers.json`, and built-in TLS anti-spoofing verification.
+- **System Tray & Autostart**: Runs silently in the system tray with optional launch-on-login support.
+- **Desktop Localization**: Downloads, updates, and rolls back the Russian language pack (SPIDIKSY/antigravity-ru) for Antigravity Desktop.
+- **Real-Time Logging**: Live streaming logs and diagnostic `.log` export.
+
+## Quick Start
+
+Download the executable for your OS from the [Releases](https://github.com/CogniDevs/agy-patcher/releases) page:
+
+- **Windows**: Run `agpatcher-windows-amd64.exe`.
+- **Linux / macOS**:
+  ```bash
+  chmod +x agpatcher-linux-amd64
+  ./agpatcher-linux-amd64
+  ```
+
+## TUI Keybindings
+
+| Key | Action |
+|---|---|
+| `↑` / `↓`, `Enter` / `→`, `←` / `Esc` | Navigate menus and tabs |
+| `Tab` / `S` | Switch panels and focus targets (`S`) |
+| `Enter` / `A` | Toggle `[✓]` / run item / select all (`A`) |
+| `Space` | Configure target path or DNS server parameters |
+| `Delete` | Remove custom path or DNS provider |
+| `D` / `+` / `[` `]` / `M` / `V` / `U` | DNS section: add (`+`), reorder (`[`/`]`), mode (`M`), verify (`V`), update catalog (`U`) |
+| `1` / `3` | Apply / rollback patches for selected targets |
+| `2` / `P` | Start / stop local proxy |
+| `4` | Clean all changes, configurations, and autostart |
+| `5` | Add path manually |
+| `6` / `7` | Install / remove Desktop localization pack |
+| `T` / `B` | Minimize to tray / toggle autostart |
+| `R` / `L` | Rescan installations / toggle UI language (`RU` / `EN`) |
+| `W` / `C` | Save diagnostic `.log` / clear logs |
+| `Q` / `Ctrl+C` | Quit and shutdown proxy and tray |
+
+## CLI Commands
+
+```text
+agpatcher [--lang en|ru] [--path <path>] [--force] [command]
+```
+
+### Commands
+
+- `patch` — Apply patches to discovered targets
+- `unpatch` — Rollback patches and restore original files
+- `proxy` — Run proxy in foreground mode
+- `start` / `stop` — Start or stop background daemon
+- `status` — Check status of installations and proxy daemon
+- `dns-check` — Probe and verify configured DNS resolvers
+- `rupack` — Install Russian localization pack for Desktop
+
+</details>
+
+<details>
+<summary><b>Русский</b></summary>
+
 Утилита для настройки работы Antigravity (Desktop, CLI `agy`, расширения для редакторов на базе VS Code и плагина JetBrains) через локальный обходной прокси на Windows, Linux и macOS.
 
 ## Функционал
@@ -80,3 +146,4 @@ go test -count=1 ./...
 ## Лицензия
 
 [MIT](LICENSE)
+</details>
