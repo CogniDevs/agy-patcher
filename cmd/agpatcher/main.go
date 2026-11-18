@@ -26,7 +26,7 @@ import (
 	"agy-patcher/pkg/tui"
 )
 
-var version = "1.0.0"
+var version = "1.0.1"
 
 type cliOptions struct {
 	lang          string
@@ -650,9 +650,13 @@ func handleClean(manualPath string) int {
 		installs = discovery.FindInstalls()
 	}
 
-	report := cleaner.CleanInstalls(installs)
+	report := cleaner.DeactivateAll(installs)
 	hasErrors := false
 	needSudoHint := false
+
+	if report.KilledProcesses > 0 || report.KilledOrphans > 0 {
+		fmt.Printf("Closed %d active processes and %d orphaned Sidecar helpers.\n", report.KilledProcesses, report.KilledOrphans)
+	}
 
 	for _, f := range report.Files {
 		if f.Err != nil {
@@ -732,8 +736,12 @@ func handleStatus(manualPath string) int {
 		}
 		for _, bin := range binaries {
 			st := patcher.InspectBinaryStatus(bin)
-			fmt.Printf(i18n.Get("status_binary_patched")+"\n",
-				bin, st.Field == patcher.StatePatched, st.ProxyVar)
+			extra := ""
+			if st.Field == patcher.StateSignatureMissing && st.TargetInfo != "" {
+				extra = fmt.Sprintf(" [%s]", st.TargetInfo)
+			}
+			fmt.Printf(i18n.Get("status_binary_patched")+"%s\n",
+				bin, st.Field == patcher.StatePatched, st.ProxyVar, extra)
 		}
 		if inst.JsPath != "" {
 			fmt.Printf(i18n.Get("status_js_patched")+"\n",

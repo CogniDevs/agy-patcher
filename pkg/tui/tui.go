@@ -2395,7 +2395,10 @@ func (m *model) triggerClean() {
 	replacedCopy := cloneReplacedMap(m.replacedPaths)
 	go func() {
 		installs := validInstalls(collectInstalls(manualCopy, replacedCopy))
-		rep := cleaner.CleanInstalls(installs)
+		rep := cleaner.DeactivateAll(installs)
+		if rep.KilledProcesses > 0 || rep.KilledOrphans > 0 {
+			m.postLog(logOK, fmt.Sprintf("Antigravity & sidecars: closed %d, orphans cleaned %d", rep.KilledProcesses, rep.KilledOrphans))
+		}
 		for _, f := range rep.Files {
 			if f.Err != nil {
 				m.postLog(logErr, fmt.Sprintf("%s: %v", filepath.Base(f.Path), f.Err))

@@ -11,6 +11,10 @@ import (
 	"agy-patcher/pkg/rupack"
 )
 
+func init() {
+	DisableProcessKillForTest = true
+}
+
 func TestRestoreAndCleanArtifacts(t *testing.T) {
 	dir := t.TempDir()
 	binFile := filepath.Join(dir, "language_server.exe")
@@ -91,5 +95,13 @@ func TestRestoreAndCleanArtifacts(t *testing.T) {
 	}
 	if _, err := os.Stat(bundleDir); !os.IsNotExist(err) {
 		t.Fatalf("expected web_bundle_ru removed during CleanInstalls")
+	}
+}
+
+func TestDeactivateAll(t *testing.T) {
+	// Verify DeactivateAll executes without panics on empty or sample installs.
+	rep := DeactivateAll(nil)
+	if rep.Err() != nil {
+		t.Fatalf("unexpected error on nil installs deactivation: %v", rep.Err())
 	}
 }

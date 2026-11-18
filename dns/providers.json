@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-11-12",
+  "updated": "2026-11-18",
   "providers": [
     {
       "name": "dns-ai.ru",
@@ -14,7 +14,7 @@
       "kind": "udp",
       "target": "31.25.239.132:53",
       "fallback_ips": ["143.20.64.192:53", "5.175.161.3:53", "37.221.93.141:53"],
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "malw.link",

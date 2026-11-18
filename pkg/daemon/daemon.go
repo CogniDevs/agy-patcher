@@ -360,7 +360,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 	autoOn, _ := autostart.IsEnabled()
 	ver := opts.Version
 	if ver == "" {
-		ver = "1.0.0"
+		ver = "1.0.1"
 	}
 
 	listenAddr := opts.ListenAddr

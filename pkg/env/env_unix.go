@@ -13,6 +13,79 @@ import (
 	"agy-patcher/internal/hostenv"
 )
 
+const (
+	shellHookBegin = "# >>> agy-patcher >>>"
+	shellHookEnd   = "# <<< agy-patcher <<<"
+)
+
+func shellBlock(confPath string) string {
+	return fmt.Sprintf("%s\n[ -r '%s' ] && { set -a; . '%s'; set +a; }\n%s\n", shellHookBegin, confPath, confPath, shellHookEnd)
+}
+
+func updateShellFile(path, block string, remove bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if remove || !os.IsNotExist(err) {
+			return
+		}
+		// Create file if it doesn't exist and we want to install hooks
+		_ = os.WriteFile(path, []byte(block), 0644)
+		return
+	}
+
+	content := string(data)
+	bIdx := strings.Index(content, shellHookBegin)
+	eIdx := strings.Index(content, shellHookEnd)
+
+	var newContent string
+	if bIdx != -1 && eIdx != -1 && eIdx > bIdx {
+		end := eIdx + len(shellHookEnd)
+		if end < len(content) && content[end] == '\n' {
+			end++
+		}
+		if remove {
+			newContent = content[:bIdx] + content[end:]
+		} else {
+			newContent = content[:bIdx] + block + content[end:]
+		}
+	} else {
+		if remove {
+			return
+		}
+		sep := ""
+		if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+			sep = "\n"
+		}
+		newContent = content + sep + block
+	}
+
+	if newContent != content {
+		_ = os.WriteFile(path, []byte(newContent), 0644)
+	}
+}
+
+func ensureShellHooks(confPath string) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return
+	}
+	blk := shellBlock(confPath)
+	updateShellFile(filepath.Join(home, ".profile"), blk, false)
+	bashrc := filepath.Join(home, ".bashrc")
+	if _, err := os.Stat(bashrc); err == nil {
+		updateShellFile(bashrc, blk, false)
+	}
+}
+
+func removeShellHooks() {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return
+	}
+	updateShellFile(filepath.Join(home, ".profile"), "", true)
+	updateShellFile(filepath.Join(home, ".bashrc"), "", true)
+}
+
 func setPersistentProxyVar(proxyURL string) error {
 	switch runtime.GOOS {
 	case "linux":
@@ -24,6 +97,7 @@ func setPersistentProxyVar(proxyURL string) error {
 		if _, err := exec.LookPath("systemctl"); err == nil {
 			_ = exec.Command("systemctl", "--user", "set-environment", fmt.Sprintf("%s=%s", ProxyVar, proxyURL)).Run()
 		}
+		ensureShellHooks(path)
 		return nil
 	case "darwin":
 		if out, err := exec.Command("launchctl", "setenv", ProxyVar, proxyURL).CombinedOutput(); err != nil {
@@ -38,6 +112,7 @@ func setPersistentProxyVar(proxyURL string) error {
 func removePersistentProxyVar() error {
 	switch runtime.GOOS {
 	case "linux":
+		removeShellHooks()
 		if err := os.Remove(environmentDPath()); err != nil && !os.IsNotExist(err) {
 			return err
 		}

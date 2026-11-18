@@ -593,7 +593,7 @@ func TestEmbeddedCatalogAndRepoSync(t *testing.T) {
 		if p.Name == "dns-ai.ru" && p.Enabled {
 			hasDNSAI = true
 		}
-		if p.Name == "eu.geohide.ru" && p.Enabled {
+		if p.Name == "eu.geohide.ru" && !p.Enabled {
 			hasEuGeo = true
 		}
 		if strings.Contains(strings.ToLower(p.Name), "comss") {

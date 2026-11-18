@@ -68,7 +68,7 @@ func DefaultDNSProviders() []DNSProviderSpec {
 			Kind:        DNSKindUDP,
 			Target:      "31.25.239.132:53",
 			FallbackIPs: []string{"143.20.64.192:53", "5.175.161.3:53", "37.221.93.141:53"},
-			Enabled:     true,
+			Enabled:     false,
 			Source:      DNSSourceCatalog,
 		},
 	}

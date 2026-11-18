@@ -60,6 +60,7 @@ type BinaryStatus struct {
 	ProxyVar      bool
 	HasOrigProxy  bool
 	NeedsPatching bool
+	TargetInfo    string
 }
 
 var (
@@ -262,10 +263,71 @@ func InspectBinaryStatus(path string) BinaryStatus {
 		st.Field = StatePatched
 	default:
 		st.Field = StateSignatureMissing
+		st.TargetInfo = DescribeBinary(path)
 	}
 
 	st.NeedsPatching = seen[1] || (!seen[2] && seen[3])
 	return st
+}
+
+// DescribeBinary inspects the binary target file and returns a human-readable diagnostic description:
+// format kind (PE/ELF/Mach-O/script/other), size in KB, and symlink destination.
+func DescribeBinary(path string) string {
+	lfi, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Sprintf("%s: не читается (%v)", filepath.Base(path), err)
+	}
+
+	var head [4]byte
+	n := 0
+	if f, err := os.Open(path); err == nil {
+		n, _ = io.ReadFull(f, head[:])
+		_ = f.Close()
+	}
+
+	kind := "другое"
+	if n >= 2 && head[0] == 'M' && head[1] == 'Z' {
+		kind = "PE"
+	} else if n >= 4 && head[0] == 0x7f && head[1] == 'E' && head[2] == 'L' && head[3] == 'F' {
+		kind = "ELF"
+	} else if n >= 2 && head[0] == '#' && head[1] == '!' {
+		kind = "скрипт"
+	} else if n >= 4 && (((head[0] == 0xcf || head[0] == 0xca) && (head[1] == 0xfa || head[1] == 0xfe)) ||
+		(head[0] == 0xfe && head[1] == 0xed && head[2] == 0xfa)) {
+		kind = "Mach-O"
+	}
+
+	link := ""
+	if lfi.Mode()&os.ModeSymlink != 0 {
+		if target, err := filepath.EvalSymlinks(path); err == nil {
+			link = fmt.Sprintf(", ссылка → %s", target)
+		} else {
+			link = ", битая ссылка"
+		}
+	}
+
+	fi, err := os.Stat(path)
+	sizeKB := int64(0)
+	if err == nil {
+		sizeKB = fi.Size() / 1024
+	}
+
+	return fmt.Sprintf("%s: %s, %d КБ%s", filepath.Base(path), kind, sizeKB, link)
+}
+
+// DescribeInstallTargets returns a combined diagnostic string for all binary targets in an installation.
+func DescribeInstallTargets(binaries []string) string {
+	if len(binaries) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(binaries))
+	for _, bin := range binaries {
+		if bin == "" {
+			continue
+		}
+		parts = append(parts, DescribeBinary(bin))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // InspectBinary returns the primary field patch state of an executable.

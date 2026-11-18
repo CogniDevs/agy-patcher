@@ -4,6 +4,7 @@ package hostenv
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -302,4 +303,192 @@ func regErr(op, name string, r1 uintptr, callErr error) error {
 		return fmt.Errorf("%s(%s): %w", op, name, callErr)
 	}
 	return fmt.Errorf("%s(%s): errno %d", op, name, r1)
+}
+
+// isSelfOrAncestor checks if targetPID is the current process or one of its parent processes.
+func isSelfOrAncestor(targetPID uint32, activeParents map[uint32]uint32) bool {
+	selfPID := uint32(syscall.Getpid())
+	if targetPID == 0 || targetPID == selfPID {
+		return true
+	}
+	curr := selfPID
+	for i := 0; i < 32; i++ {
+		parent, ok := activeParents[curr]
+		if !ok || parent == 0 {
+			break
+		}
+		if parent == targetPID {
+			return true
+		}
+		curr = parent
+	}
+	return false
+}
+
+// TerminateOrphanProcesses scans active processes and terminates those matching targetNames
+// whose parent process no longer exists in the system (orphaned Sidecar SDK helpers).
+// Processes whose parent is alive are preserved.
+func TerminateOrphanProcesses(targetNames []string) int {
+	if len(targetNames) == 0 {
+		return 0
+	}
+	targetMap := make(map[string]bool, len(targetNames))
+	for _, n := range targetNames {
+		targetMap[strings.ToLower(strings.TrimSpace(n))] = true
+	}
+
+	snap, err := syscall.CreateToolhelp32Snapshot(syscall.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return 0
+	}
+	defer syscall.CloseHandle(snap)
+
+	var pe syscall.ProcessEntry32
+	pe.Size = uint32(unsafe.Sizeof(pe))
+	if err := syscall.Process32First(snap, &pe); err != nil {
+		return 0
+	}
+
+	type candidate struct {
+		pid       uint32
+		parentPID uint32
+	}
+
+	activePIDs := make(map[uint32]bool)
+	parentMap := make(map[uint32]uint32)
+	var candidates []candidate
+
+	for {
+		exeName := syscall.UTF16ToString(pe.ExeFile[:])
+		pid := pe.ProcessID
+		parentPID := pe.ParentProcessID
+		if pid != 0 {
+			activePIDs[pid] = true
+			parentMap[pid] = parentPID
+			if targetMap[strings.ToLower(exeName)] {
+				candidates = append(candidates, candidate{
+					pid:       pid,
+					parentPID: parentPID,
+				})
+			}
+		}
+		if err := syscall.Process32Next(snap, &pe); err != nil {
+			break
+		}
+	}
+
+	killed := 0
+	for _, c := range candidates {
+		// Never touch ourselves or our ancestor processes.
+		if isSelfOrAncestor(c.pid, parentMap) {
+			continue
+		}
+		// If the parent process no longer exists in the snapshot, the process is orphaned.
+		if c.parentPID == 0 || !activePIDs[c.parentPID] {
+			h, err := syscall.OpenProcess(procTerminateRight, false, c.pid)
+			if err == nil {
+				if err := syscall.TerminateProcess(h, 1); err == nil {
+					killed++
+				}
+				_ = syscall.CloseHandle(h)
+			}
+		}
+	}
+	return killed
+}
+
+// CloseProcessesByNames forcefully terminates all processes matching any of the given executable names.
+func CloseProcessesByNames(names []string) int {
+	if len(names) == 0 {
+		return 0
+	}
+	nameMap := make(map[string]bool, len(names))
+	for _, n := range names {
+		nameMap[strings.ToLower(strings.TrimSpace(n))] = true
+	}
+
+	snap, err := syscall.CreateToolhelp32Snapshot(syscall.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return 0
+	}
+	defer syscall.CloseHandle(snap)
+
+	var pe syscall.ProcessEntry32
+	pe.Size = uint32(unsafe.Sizeof(pe))
+	if err := syscall.Process32First(snap, &pe); err != nil {
+		return 0
+	}
+
+	parentMap := make(map[uint32]uint32)
+	type hit struct {
+		pid uint32
+	}
+	var hits []hit
+
+	for {
+		exeName := syscall.UTF16ToString(pe.ExeFile[:])
+		if pe.ProcessID != 0 {
+			parentMap[pe.ProcessID] = pe.ParentProcessID
+			if nameMap[strings.ToLower(exeName)] {
+				hits = append(hits, hit{pid: pe.ProcessID})
+			}
+		}
+		if err := syscall.Process32Next(snap, &pe); err != nil {
+			break
+		}
+	}
+
+	killed := 0
+	for _, hProc := range hits {
+		if isSelfOrAncestor(hProc.pid, parentMap) {
+			continue
+		}
+		h, err := syscall.OpenProcess(procTerminateRight, false, hProc.pid)
+		if err == nil {
+			if err := syscall.TerminateProcess(h, 1); err == nil {
+				killed++
+			}
+			_ = syscall.CloseHandle(h)
+		}
+	}
+	return killed
+}
+
+var procProcessIdToSessionId = kernel32.NewProc("ProcessIdToSessionId")
+var procGetCurrentProcessId = kernel32.NewProc("GetCurrentProcessId")
+
+// InServiceSession reports whether the current process runs in Windows Session 0 (service/S4U task).
+func InServiceSession() bool {
+	pid, _, _ := procGetCurrentProcessId.Call()
+	var sid uint32 = 0xFFFFFFFF
+	r1, _, _ := procProcessIdToSessionId.Call(pid, uintptr(unsafe.Pointer(&sid)))
+	return r1 != 0 && sid == 0
+}
+
+// LaunchInUserSession spawns app in the active user interactive session using a temporary scheduled task.
+// This prevents Session 0 S4U tasks from starting invisible UI processes that hold Electron single-instance locks.
+func LaunchInUserSession(app string) error {
+	absApp, err := filepath.Abs(app)
+	if err != nil {
+		absApp = app
+	}
+	dir := filepath.Dir(absApp)
+	stem := strings.TrimSuffix(filepath.Base(absApp), filepath.Ext(absApp))
+	script := fmt.Sprintf(`$ErrorActionPreference='Stop'; $n='AG Unlocker Reopen'; `+
+		`$a=New-ScheduledTaskAction -Execute '%s' -WorkingDirectory '%s'; `+
+		`$p=New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited; `+
+		`$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero); `+
+		`Register-ScheduledTask -TaskName $n -Action $a -Principal $p -Settings $s -Description 'Antigravity Unlocker: reopen the app in the user session' -Force | Out-Null; `+
+		`Start-ScheduledTask -TaskName $n; `+
+		`for ($i=0; $i -lt 20; $i++) { if (Get-Process -Name '%s' -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -ne 0 }) { exit 0 }; Start-Sleep -Milliseconds 500 }; `+
+		`[Console]::Error.WriteLine('process not seen in a user session'); exit 1`,
+		strings.ReplaceAll(absApp, "'", "''"),
+		strings.ReplaceAll(dir, "'", "''"),
+		strings.ReplaceAll(stem, "'", "''"),
+	)
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("launch in user session failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
