@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -198,8 +199,17 @@ func TestServiceStartStopProxyConcurrentNoDeadlock(t *testing.T) {
 			done <- http.ErrAbortHandler
 			return
 		}
-		if recordedAfter, rErr := ReadStateFile(); rErr != nil || recordedAfter.ProxyAddr != "" {
-			done <- http.ErrHandlerTimeout
+		var recordedAfter Info
+		var rErr error
+		for i := 0; i < 20; i++ {
+			recordedAfter, rErr = ReadStateFile()
+			if rErr == nil && recordedAfter.ProxyAddr == "" {
+				break
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+		if rErr != nil || recordedAfter.ProxyAddr != "" {
+			done <- fmt.Errorf("state file proxy not cleared: err=%v, recorded=%+v", rErr, recordedAfter)
 			return
 		}
 		done <- nil

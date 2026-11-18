@@ -956,32 +956,7 @@ func writeJSONFile(path string, v any) error {
 		return err
 	}
 	data = append(data, '\n')
-
-	tmp, err := os.CreateTemp(filepath.Dir(path), "daemon.*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
-		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	_ = os.Chmod(tmpName, 0600)
-	if err := os.Rename(tmpName, path); err != nil {
-		return err
-	}
-	cleanup = false
-	return nil
+	return hostenv.WriteFileAtomic(path, data, 0600, nil)
 }
 
 func removeOwnedStateFile(path string, own Info) {
